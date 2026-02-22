@@ -80,10 +80,12 @@ app.get('/api/info', (req, res) => {
     proc.on('close', code => {
         if (code !== 0) {
             const isPrivate = /sign in|private|login|members only/i.test(err);
+            const rawError = err.split('\n').filter(l => l.trim()).pop() || 'Unknown error';
+
             return res.status(500).json({
                 error: isPrivate
-                    ? 'This video is private. Enable Private Mode and pick the browser you\'re logged in with.'
-                    : 'Could not fetch video info. Check the URL and try again.'
+                    ? 'Video flagged as Private/Restricted. (Note: Private cookies only work on local hosting, not on Render).'
+                    : `YouTube Blocked Request: ${rawError}`
             });
         }
         try {
