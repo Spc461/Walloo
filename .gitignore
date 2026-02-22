@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+dist/
+.env
+
+# Windows Binaries (We use Docker for Linux hosting)
+bin/
+*.exe
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
