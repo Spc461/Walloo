@@ -8,10 +8,15 @@ const os = require('os');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({
-    origin: '*',
-    exposedHeaders: ['Content-Disposition']
-}));
+app.use(cors()); // Allow all origins for simple and preflight requests
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+    res.header('Access-Control-Expose-Headers', 'Content-Disposition');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    next();
+});
 app.use(express.json());
 
 const IS_WIN = process.platform === 'win32';
@@ -26,6 +31,11 @@ const TMPDIR = os.tmpdir();
 function cookieArgs(privateMode, browser) {
     return privateMode === 'true' ? ['--cookies-from-browser', browser || 'chrome'] : [];
 }
+
+// ─── Health Check ──────────────────────────────────────────
+app.get('/', (req, res) => {
+    res.send('✅ SPC Media Server is running! Point your frontend VITE_API_BASE to this URL.');
+});
 
 // ─── Fixed 4 clean format options ───────────────────────────
 const FIXED_FORMATS = [
