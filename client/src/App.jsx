@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import {
     Download, Link2, AlertCircle, Loader2, Video, Music,
-    Lock, Unlock, Instagram, X, Check, Zap, Globe,
+    Instagram, X, Check, Zap, Globe,
     Server, Gauge, HeadphonesIcon, Code2, Key, ChevronRight
 } from 'lucide-react';
 import axios from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
-const BROWSERS = ['chrome', 'edge', 'firefox', 'opera', 'brave'];
 
 /* Colors from user's WALOO image */
 const C = {
@@ -93,7 +92,7 @@ const PLANS = [
 const FEATURES = [
     { icon: Zap, title: 'Fast extraction', desc: 'Video metadata in under 1 s' },
     { icon: Globe, title: '1000+ sites', desc: 'YouTube, Telegram, TikTok, Udemy…' },
-    { icon: Lock, title: 'Private content', desc: 'Cookie-based auth for restricted ' },
+    { icon: Globe, title: 'Global access', desc: 'Download from 1000+ sites instantly' },
     { icon: Code2, title: 'Simple REST', desc: 'Two clean endpoints, JSON responses' },
     { icon: Gauge, title: '99.9% uptime', desc: 'Hosted on fast, reliable servers' },
     { icon: HeadphonesIcon, title: 'Dev support', desc: 'Full docs + Discord from WALOO/SPC' },
@@ -258,8 +257,6 @@ function ApiModal({ onClose }) {
 /* ══════════ Main App ══════════ */
 export default function App() {
     const [url, setUrl] = useState('');
-    const [privateMode, setPrivateMode] = useState(false);
-    const [browser, setBrowser] = useState('chrome');
     const [loading, setLoading] = useState(false);
     const [info, setInfo] = useState(null);
     const [error, setError] = useState('');
@@ -272,7 +269,7 @@ export default function App() {
         setLoading(true); setError(''); setInfo(null);
         try {
             const r = await axios.get(`${API_BASE}/api/info`, {
-                params: { url: u, privateMode: privateMode ? 'true' : 'false', browser }
+                params: { url: u }
             });
             setInfo(r.data);
         } catch (e) {
@@ -280,9 +277,9 @@ export default function App() {
             if (!e.response) {
                 // No response = request didn't even reach the server
                 if (window.location.hostname !== 'localhost' && API_BASE.includes('localhost')) {
-                    setError('Environment Variable missing! You must set VITE_API_BASE in Netlify to your Render URL.');
+                    setError(`Environment Variable missing! The app is trying to hit ${API_BASE} which doesn't exist in the cloud. Set VITE_API_BASE on Netlify.`);
                 } else {
-                    setError('Request blocked! This is usually caused by an Ad-blocker. Please disable your Ad-blocker (like uBlock or AdBlock) and try again.');
+                    setError(`Network Error: Browser blocked the request to ${API_BASE}. This is usually an Ad-blocker, Firewall, or a CORS/SSL mismatch. Try disabling your Ad-blocker or opening in Incognito.`);
                 }
             } else {
                 setError(e.response?.data?.error || 'Could not fetch video info. Check the link and try again.');
@@ -296,9 +293,7 @@ export default function App() {
             url,
             format: fmt.format_id,
             ext: fmt.ext,
-            label: fmt.label,
-            privateMode: privateMode ? 'true' : 'false',
-            browser
+            label: fmt.label
         }).toString();
 
         // Ensure API_BASE is absolute. If it's a proxy (/api), browser handles it.
@@ -418,62 +413,8 @@ export default function App() {
                         </button>
                     </div>
 
-                    {/* Private mode toggle */}
-                    <div style={{ padding: '10px 14px' }}>
-                        <div style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '11px 14px', borderRadius: 12,
-                            background: C.bg, border: `1px solid ${C.border}`,
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                {privateMode
-                                    ? <Lock size={13} style={{ color: C.green }} />
-                                    : <Unlock size={13} style={{ color: C.textDim }} />}
-                                <div>
-                                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#ccc' }}>
-                                        Private Mode{privateMode && <span style={{ color: C.green, marginLeft: 6 }}>ON</span>}
-                                    </p>
-                                    <p style={{ margin: 0, fontSize: 11, color: C.textDim, marginTop: 1 }}>
-                                        {privateMode ? `Using your ${browser} session` : 'Telegram, Udemy, private/member-only sites'}
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setPrivateMode(p => !p)}
-                                style={{
-                                    position: 'relative', width: 44, height: 24, borderRadius: 12, border: 'none',
-                                    background: privateMode ? C.green : '#222', cursor: 'pointer', flexShrink: 0,
-                                    transition: 'background 0.2s',
-                                }}>
-                                <span style={{
-                                    position: 'absolute', top: 3, left: 3, width: 18, height: 18, borderRadius: '50%',
-                                    background: '#fff', transition: 'transform 0.2s',
-                                    transform: privateMode ? 'translateX(20px)' : 'none',
-                                }} />
-                            </button>
-                        </div>
-
-                        {/* Browser picker */}
-                        {privateMode && (
-                            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                <p style={{ width: '100%', margin: '0 0 4px', fontSize: 10, fontWeight: 700, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                                    Select the browser you're logged in with:
-                                </p>
-                                {BROWSERS.map(b => (
-                                    <button key={b} onClick={() => setBrowser(b)}
-                                        style={{
-                                            padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                                            cursor: 'pointer', textTransform: 'capitalize', border: '1px solid',
-                                            background: browser === b ? C.greenDim : 'transparent',
-                                            borderColor: browser === b ? C.greenBorder : C.border,
-                                            color: browser === b ? C.green : C.textDim,
-                                        }}>
-                                        {b}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                    {/* Main input wrapper padding */}
+                    <div style={{ padding: '0 0 14px' }}></div>
 
                     {/* Divider */}
                     {(error || info) && <div style={{ borderTop: `1px solid ${C.border}`, margin: '0 14px' }} />}
@@ -489,11 +430,6 @@ export default function App() {
                             <AlertCircle size={14} style={{ color: '#f87171', flexShrink: 0, marginTop: 1 }} />
                             <div>
                                 <p style={{ margin: 0, fontSize: 13, color: '#f87171', fontWeight: 600 }}>{error}</p>
-                                {/private|restricted/i.test(error) && (
-                                    <p style={{ margin: '4px 0 0', fontSize: 11, color: 'rgba(248,113,113,0.5)' }}>
-                                        Enable Private Mode and pick the browser you're logged in with.
-                                    </p>
-                                )}
                             </div>
                         </div>
                     )}
