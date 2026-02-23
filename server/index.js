@@ -80,12 +80,15 @@ app.get('/api/info', (req, res) => {
     proc.on('close', code => {
         if (code !== 0) {
             const isPrivate = /sign in|private|login|members only/i.test(err);
+            const isCookieError = /cookies|chrome|browser/i.test(err);
             const rawError = err.split('\n').filter(l => l.trim()).pop() || 'Unknown error';
 
             return res.status(500).json({
                 error: isPrivate
-                    ? 'Video flagged as Private/Restricted. (Note: Private cookies only work on local hosting, not on Render).'
-                    : `YouTube Blocked Request: ${rawError}`
+                    ? 'Video flagged as Private/Restricted. (Note: Private Mode ONLY works on local hosting, not on Render).'
+                    : isCookieError
+                        ? `Cookie Error: Browser not found on server. Turn OFF "Private Mode" and try again.`
+                        : `YouTube Blocked Request: ${rawError}`
             });
         }
         try {
