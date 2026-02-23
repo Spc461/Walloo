@@ -28,9 +28,15 @@ const FFMPEG = IS_WIN
     : 'ffmpeg';
 const TMPDIR = os.tmpdir();
 
-function cookieArgs(privateMode, browser) {
-    return privateMode === 'true' ? ['--cookies-from-browser', browser || 'chrome'] : [];
-}
+// ─── Cloud Bypass Config ───────────────────────────────────
+
+const BYPASS_ARGS = [
+    '--no-check-certificate',
+    '--prefer-free-formats',
+    '--add-header', 'Accept-Language:en-US,en;q=0.9',
+    '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    '--extractor-args', 'youtube:player-client=ios,web,android;innertube:player_client=ios,web,android'
+];
 
 // ─── Health Check ──────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -67,10 +73,15 @@ const FIXED_FORMATS = [
 
 // ─── GET /api/info ───────────────────────────────────────────
 app.get('/api/info', (req, res) => {
-    const { url, privateMode, browser } = req.query;
+    const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
-    const args = ['-j', '--no-playlist', ...cookieArgs(privateMode, browser), url];
+    const args = [
+        ...BYPASS_ARGS,
+        '-j',
+        '--no-playlist',
+        url
+    ];
     const proc = spawn(YTDLP, args);
 
     let out = '', err = '';
@@ -79,16 +90,10 @@ app.get('/api/info', (req, res) => {
 
     proc.on('close', code => {
         if (code !== 0) {
-            const isPrivate = /sign in|private|login|members only/i.test(err);
-            const isCookieError = /cookies|chrome|browser/i.test(err);
             const rawError = err.split('\n').filter(l => l.trim()).pop() || 'Unknown error';
 
             return res.status(500).json({
-                error: isPrivate
-                    ? 'Video flagged as Private/Restricted. (Note: Private Mode ONLY works on local hosting, not on Render).'
-                    : isCookieError
-                        ? `Cookie Error: Browser not found on server. Turn OFF "Private Mode" and try again.`
-                        : `YouTube Blocked Request: ${rawError}`
+                error: `Download Error: ${rawError}`
             });
         }
         try {
@@ -111,7 +116,7 @@ app.get('/api/info', (req, res) => {
 // Downloads to a temp file, then streams it to the browser.
 // Browser shows a native Save / Download dialog.
 app.get('/api/download', (req, res) => {
-    const { url, format, ext, label, privateMode, browser } = req.query;
+    const { url, format, ext, label } = req.query;
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
     const fileExt = (ext || 'mp4').replace(/[^a-z0-9]/gi, '');
@@ -119,12 +124,12 @@ app.get('/api/download', (req, res) => {
     const tmpFile = path.join(TMPDIR, `spc_${Date.now()}.${fileExt}`);
 
     const args = [
+        ...BYPASS_ARGS,
         '--ffmpeg-location', FFMPEG,
         '-f', format || 'best',
         '--merge-output-format', fileExt,
         '--no-playlist',
         '-o', tmpFile,
-        ...cookieArgs(privateMode, browser),
         url
     ];
 
