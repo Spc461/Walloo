@@ -31,8 +31,6 @@ const FFMPEG = IS_WIN
 const TMPDIR = os.tmpdir();
 
 // ─── YouTube Cookie Setup ────────────────────────────────────
-// Write the YOUTUBE_COOKIES env variable to a file so yt-dlp can use it.
-// On Render: set Environment Variable YOUTUBE_COOKIES = content of cookies.txt
 const COOKIES_FILE = path.join(TMPDIR, 'yt_cookies.txt');
 let cookieArgs = [];
 
@@ -44,8 +42,6 @@ if (process.env.YOUTUBE_COOKIES) {
     } catch (e) {
         console.warn('⚠️  Failed to write cookies file:', e.message);
     }
-} else {
-    console.warn('⚠️  YOUTUBE_COOKIES env var not set. Downloads may be blocked by bot detection.');
 }
 
 // ─── Smart Bypass Engine ─────────────────────────────────────
@@ -55,60 +51,62 @@ function getSmartArgs(url) {
 
     let args = [
         '--no-check-certificate',
-        '--prefer-free-formats',
         '--add-header', 'Accept-Language:en-US,en;q=0.9',
     ];
 
     if (isYT) {
-        // ios client is currently most reliable for skipping login without cookies
         args.push('--extractor-args', 'youtube:player-client=ios,web');
         args.push('--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1');
     } else if (isIG) {
-        // Instagram requires specific mobile headers to avoid blocking
         args.push('--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1');
     } else {
-        // Generic modern browser UA for everything else
         args.push('--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
     }
 
-    // Add cookies if available
     if (cookieArgs.length > 0) args.push(...cookieArgs);
-
     return args;
 }
 
-// ─── Fixed 4 quality options ─────────────────────────────────
-const FIXED_FORMATS = [
-    {
-        format_id: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
-        label: 'Best Quality',
-        ext: 'mp4',
-        type: 'video'
-    },
-    {
-        format_id: 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best',
-        label: '1080p HD',
-        ext: 'mp4',
-        type: 'video'
-    },
-    {
-        format_id: 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best',
-        label: '720p',
-        ext: 'mp4',
-        type: 'video'
-    },
-    {
+// ─── Format Processor ────────────────────────────────────────
+// Filters raw yt-dlp JSON into clean, UI-friendly options
+function processFormats(raw) {
+    const formats = [];
+    const seenHeights = new Set();
+
+    // 1. Add High-res Video (Requires merging)
+    // We look for standard resolutions
+    const targets = [2160, 1440, 1080, 720, 480, 360];
+
+    targets.forEach(h => {
+        // Find best MP4-compatible video at this height
+        const v = raw.formats.find(f => f.height === h && (f.ext === 'mp4' || f.vcodec !== 'none') && f.acodec === 'none');
+        if (v && !seenHeights.has(h)) {
+            formats.push({
+                format_id: `${v.format_id}+bestaudio[ext=m4a]/bestvideo+bestaudio/best`,
+                label: `${h}p ${h >= 720 ? 'HD' : ''}`,
+                ext: 'mp4',
+                type: 'video',
+                note: v.format_note || ''
+            });
+            seenHeights.add(h);
+        }
+    });
+
+    // 2. Add Audio Only (MP3/M4A)
+    formats.push({
         format_id: 'bestaudio[ext=m4a]/bestaudio/best',
-        label: 'Audio Only',
+        label: 'Best Audio (M4A/MP3)',
         ext: 'm4a',
-        type: 'audio'
-    }
-];
+        type: 'audio',
+        note: 'High quality'
+    });
+
+    return formats;
+}
 
 // ─── Health Check ────────────────────────────────────────────
 app.get('/', (req, res) => {
-    const cookieStatus = cookieArgs.length > 0 ? '✅ Cookies: Loaded' : '⚠️ Cookies: Not set';
-    res.send(`✅ WALOO Media Server is running! | ${cookieStatus}`);
+    res.send(`✅ WALOO Professional API is running!`);
 });
 
 // ─── GET /api/info ───────────────────────────────────────────
@@ -123,7 +121,7 @@ app.get('/api/info', (req, res) => {
         url
     ];
 
-    console.log('[info] Running yt-dlp for:', url);
+    console.log('[info] Fetching metadata for:', url);
     const proc = spawn(YTDLP, args);
 
     let out = '', err = '';
@@ -132,29 +130,29 @@ app.get('/api/info', (req, res) => {
 
     proc.on('error', e => {
         console.error('[info] spawn error:', e.message);
-        if (!res.headersSent)
-            res.status(500).json({ error: 'Server error: Could not start download process.' });
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to start extractor.' });
     });
 
     proc.on('close', code => {
         if (code !== 0) {
-            console.error('[info] yt-dlp error:', err.slice(-600));
-            const lines = err.split('\n').filter(l => l.trim());
-            const errorLine = lines.find(l => l.includes('ERROR:')) || lines[lines.length - 1] || 'Unknown error';
-            return res.status(500).json({ error: errorLine.replace('ERROR: ', '').trim() });
+            console.error('[info] yt-dlp error:', err.slice(-500));
+            return res.status(500).json({ error: 'YouTube Blocked: Bot detection active.' });
         }
 
         try {
-            const info = JSON.parse(out);
+            const rawInfo = JSON.parse(out);
+            const cleanFormats = processFormats(rawInfo);
+
             res.json({
-                title: info.title,
-                thumbnail: info.thumbnail,
-                duration: info.duration,
-                uploader: info.uploader || info.channel || '',
-                formats: FIXED_FORMATS
+                title: rawInfo.title,
+                thumbnail: rawInfo.thumbnail,
+                duration: rawInfo.duration,
+                uploader: rawInfo.uploader || rawInfo.channel || '',
+                formats: cleanFormats,
+                is_playlist: rawInfo._type === 'playlist'
             });
         } catch (e) {
-            res.status(500).json({ error: 'Could not read video data.' });
+            res.status(500).json({ error: 'Internal Error: Could not parse metadata.' });
         }
     });
 });
@@ -165,12 +163,8 @@ app.get('/api/download', (req, res) => {
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
     const fileExt = (ext || 'mp4').replace(/[^a-z0-9]/gi, '');
-    const safeLabel = (label || 'video')
-        .replace(/[^\w\s-]/g, '')
-        .trim()
-        .replace(/\s+/g, '_')
-        .substring(0, 80);
-    const tmpFile = path.join(TMPDIR, `spc_${Date.now()}.${fileExt}`);
+    const safeLabel = (label || 'video').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_').substring(0, 80);
+    const tmpFile = path.join(TMPDIR, `waloo_${Date.now()}.${fileExt}`);
 
     const args = [
         ...getSmartArgs(url),
@@ -182,26 +176,21 @@ app.get('/api/download', (req, res) => {
         url
     ];
 
-    console.log('[download] Downloading:', url, 'format:', format);
-    const proc = spawn(YTDLP, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    console.log('[download] Starting:', url);
+    const proc = spawn(YTDLP, args);
 
     proc.stdout.on('data', d => process.stdout.write(d));
     proc.stderr.on('data', d => process.stderr.write(d));
 
-    proc.on('error', e => {
-        console.error('[download] spawn error:', e.message);
-        if (!res.headersSent) res.status(500).json({ error: 'Download failed to start.' });
-    });
-
     proc.on('close', code => {
         if (code !== 0 || !fs.existsSync(tmpFile)) {
-            if (!res.headersSent) return res.status(500).json({ error: 'Download failed. Try a different quality.' });
+            if (!res.headersSent) return res.status(500).json({ error: 'Download failed.' });
             return;
         }
+
         const filename = `${safeLabel}.${fileExt}`;
         res.download(tmpFile, filename, err => {
             fs.unlink(tmpFile, () => { });
-            if (err && !res.headersSent) res.status(500).json({ error: 'File send failed.' });
         });
     });
 
@@ -209,5 +198,5 @@ app.get('/api/download', (req, res) => {
 });
 
 app.listen(PORT, () =>
-    console.log(`✅  WALOO Media Server  →  http://localhost:${PORT}`)
+    console.log(`✅  WALOO API  →  http://localhost:${PORT}`)
 );

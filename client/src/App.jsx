@@ -501,7 +501,10 @@ export default function App() {
                                                     : f.type === 'audio' ? <Music size={13} /> : <Video size={13} />}
                                             </div>
                                             <div style={{ flex: 1 }}>
-                                                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: active ? C.green : '#d0d0d0' }}>{f.label}</p>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: active ? C.green : '#d0d0d0' }}>{f.label}</p>
+                                                    {f.note && <span style={{ fontSize: 9, color: C.textDim, background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase', fontWeight: 700 }}>{f.note}</span>}
+                                                </div>
                                                 <p style={{ margin: 0, fontSize: 10, color: C.textDim, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>.{f.ext}</p>
                                             </div>
                                             <Download size={13} style={{ color: C.textDim, flexShrink: 0 }} />
