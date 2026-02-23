@@ -8,7 +8,8 @@ const os = require('os');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors()); // Allow all origins for simple and preflight requests
+// ─── CORS ───────────────────────────────────────────────────
+app.use(cors());
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
@@ -19,6 +20,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
+// ─── Paths ──────────────────────────────────────────────────
 const IS_WIN = process.platform === 'win32';
 const YTDLP = IS_WIN
     ? path.join(__dirname, '..', 'bin', 'yt-dlp.exe')
@@ -28,22 +30,16 @@ const FFMPEG = IS_WIN
     : 'ffmpeg';
 const TMPDIR = os.tmpdir();
 
-// ─── Cloud Bypass Config ───────────────────────────────────
-
+// ─── YouTube Cloud Bypass Args ───────────────────────────────
+// The 'android' client is the most reliable bypass of YouTube's bot detection.
+// '--no-check-certificate' fixes SSL issues on some cloud hosts.
 const BYPASS_ARGS = [
     '--no-check-certificate',
-    '--prefer-free-formats',
-    '--add-header', 'Accept-Language:en-US,en;q=0.9',
-    '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    '--extractor-args', 'youtube:player-client=ios,web,android;innertube:player_client=ios,web,android'
+    '--extractor-args', 'youtube:player_client=android',
+    '--user-agent', 'com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip',
 ];
 
-// ─── Health Check ──────────────────────────────────────────
-app.get('/', (req, res) => {
-    res.send('✅ SPC Media Server is running! Point your frontend VITE_API_BASE to this URL.');
-});
-
-// ─── Fixed 4 clean format options ───────────────────────────
+// ─── Fixed 4 quality options ─────────────────────────────────
 const FIXED_FORMATS = [
     {
         format_id: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
@@ -71,6 +67,11 @@ const FIXED_FORMATS = [
     }
 ];
 
+// ─── Health Check ────────────────────────────────────────────
+app.get('/', (req, res) => {
+    res.send('✅ WALOO Media Server is running!');
+});
+
 // ─── GET /api/info ───────────────────────────────────────────
 app.get('/api/info', (req, res) => {
     const { url } = req.query;
@@ -82,23 +83,32 @@ app.get('/api/info', (req, res) => {
         '--no-playlist',
         url
     ];
+
+    console.log('[info] Running:', YTDLP, args.join(' '));
     const proc = spawn(YTDLP, args);
 
     let out = '', err = '';
     proc.stdout.on('data', d => { out += d; });
     proc.stderr.on('data', d => { err += d; });
 
-    proc.on('close', code => {
-        if (code !== 0) {
-            const rawError = err.split('\n').filter(l => l.trim()).pop() || 'Unknown error';
+    proc.on('error', e => {
+        console.error('[info] spawn error:', e.message);
+        if (!res.headersSent)
+            res.status(500).json({ error: 'Could not start yt-dlp. Server configuration error.' });
+    });
 
-            return res.status(500).json({
-                error: `Download Error: ${rawError}`
-            });
+    proc.on('close', code => {
+        console.log('[info] yt-dlp exited with code', code);
+        if (code !== 0) {
+            console.error('[info] stderr:', err.slice(-800));
+            // Extract the most readable error line
+            const lines = err.split('\n').filter(l => l.trim());
+            const errorLine = lines.find(l => l.includes('ERROR:')) || lines[lines.length - 1] || 'Unknown error';
+            return res.status(500).json({ error: errorLine.replace('ERROR: ', '').trim() });
         }
+
         try {
             const info = JSON.parse(out);
-            // Always return the same 4 clean choices
             res.json({
                 title: info.title,
                 thumbnail: info.thumbnail,
@@ -106,21 +116,24 @@ app.get('/api/info', (req, res) => {
                 uploader: info.uploader || info.channel || '',
                 formats: FIXED_FORMATS
             });
-        } catch {
+        } catch (e) {
+            console.error('[info] JSON parse error:', e.message);
             res.status(500).json({ error: 'Could not read video data.' });
         }
     });
 });
 
 // ─── GET /api/download ───────────────────────────────────────
-// Downloads to a temp file, then streams it to the browser.
-// Browser shows a native Save / Download dialog.
 app.get('/api/download', (req, res) => {
     const { url, format, ext, label } = req.query;
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
     const fileExt = (ext || 'mp4').replace(/[^a-z0-9]/gi, '');
-    const safeLabel = (label || 'video').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_').substring(0, 80);
+    const safeLabel = (label || 'video')
+        .replace(/[^\w\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '_')
+        .substring(0, 80);
     const tmpFile = path.join(TMPDIR, `spc_${Date.now()}.${fileExt}`);
 
     const args = [
@@ -133,27 +146,26 @@ app.get('/api/download', (req, res) => {
         url
     ];
 
-    console.log('[download] yt-dlp', args.join(' '));
-
+    console.log('[download] Running:', YTDLP, args.join(' '));
     const proc = spawn(YTDLP, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     proc.stdout.on('data', d => process.stdout.write(d));
     proc.stderr.on('data', d => process.stderr.write(d));
 
-    proc.on('error', err => {
-        console.error('[spawn error]', err);
+    proc.on('error', e => {
+        console.error('[download] spawn error:', e.message);
         if (!res.headersSent) res.status(500).json({ error: 'Download failed to start.' });
     });
 
     proc.on('close', code => {
+        console.log('[download] yt-dlp exited with code', code);
         if (code !== 0 || !fs.existsSync(tmpFile)) {
-            if (!res.headersSent) return res.status(500).json({ error: 'yt-dlp failed.' });
+            if (!res.headersSent) return res.status(500).json({ error: 'Download failed. Try a different quality.' });
             return;
         }
-        // Stream file to browser as an attachment (triggers Save dialog)
         const filename = `${safeLabel}.${fileExt}`;
         res.download(tmpFile, filename, err => {
-            fs.unlink(tmpFile, () => { }); // clean up temp file
+            fs.unlink(tmpFile, () => { });
             if (err && !res.headersSent) res.status(500).json({ error: 'File send failed.' });
         });
     });
@@ -162,5 +174,5 @@ app.get('/api/download', (req, res) => {
 });
 
 app.listen(PORT, () =>
-    console.log(`✅  SPC Media Server  →  http://localhost:${PORT}`)
+    console.log(`✅  WALOO Media Server  →  http://localhost:${PORT}`)
 );
